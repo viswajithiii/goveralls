@@ -14,13 +14,70 @@ import (
 	"go/build"
 	"io/ioutil"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"golang.org/x/tools/cover"
 )
 
+func getModuleNameFromGoMod(goModPath string) string {
+	bytes, err := ioutil.ReadFile(goModPath)
+	if err != nil {
+		log.Printf("Couldn't read go.mod %v", err)
+	}
+	contents := string(bytes)
+	lines := strings.Split(contents, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "module") {
+			fields := strings.Fields(line)
+			if len(fields) > 1 {
+				return fields[1]
+			}
+		}
+	}
+	return ""
+}
+
+func maybeFindFileFastPath(file string) string {
+	// Look to see if there is a go.mod.
+	abs, err := filepath.Abs(".")
+	if err != nil {
+		log.Printf("Failed to get abs: %v", err)
+		return ""
+	}
+	var moduleName string
+	for {
+		goModFile := filepath.Join(abs, "go.mod")
+		info, err := os.Stat(goModFile)
+		if err == nil && !info.IsDir() {
+			moduleName = getModuleNameFromGoMod(goModFile)
+			break
+		}
+		d := filepath.Dir(abs)
+		if len(d) >= len(abs) {
+			log.Printf("Ran out %q %q", d, abs)
+			return ""
+		}
+		abs = d
+	}
+
+	if moduleName == "" {
+		log.Println("No module name")
+		return ""
+	}
+	joined := filepath.Join(abs, strings.TrimPrefix(file, moduleName))
+	if fileInfo, err := os.Stat(joined); err == nil && !fileInfo.IsDir() {
+		return joined
+	}
+	return ""
+}
+
 func findFile(file string) (string, error) {
+	if fileName := maybeFindFileFastPath(file); fileName != "" {
+		return fileName, nil
+	}
+	log.Printf("Couldn't find fast path for file %s", file)
 	dir, file := filepath.Split(file)
 	pkg, err := build.Import(dir, ".", build.FindOnly)
 	if err != nil {
@@ -114,6 +171,7 @@ func toSF(profs []*cover.Profile) ([]*SourceFile, error) {
 
 func parseCover(fn string) ([]*SourceFile, error) {
 	var pfss [][]*cover.Profile
+	fmt.Println("Parsing profiles")
 	for _, p := range strings.Split(fn, ",") {
 		profs, err := cover.ParseProfiles(p)
 		if err != nil {
@@ -121,11 +179,15 @@ func parseCover(fn string) ([]*SourceFile, error) {
 		}
 		pfss = append(pfss, profs)
 	}
+	fmt.Println("Parsed profiles")
 
-	sourceFiles, err := toSF(mergeProfs(pfss))
+	mergedProfs := mergeProfs(pfss)
+	fmt.Println("Merged profiles")
+	sourceFiles, err := toSF(mergedProfs)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("convered merged profiles to sf")
 
 	return sourceFiles, nil
 }

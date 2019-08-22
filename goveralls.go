@@ -123,6 +123,7 @@ func getPkgs(pkg string) ([]string, error) {
 
 func getCoverage() ([]*SourceFile, error) {
 	if *coverprof != "" {
+		fmt.Println("Parsing cover")
 		return parseCover(*coverprof)
 	}
 
@@ -286,10 +287,12 @@ func process() error {
 		pullRequest = prNumber
 	}
 
+	log.Println("Getting coverage")
 	sourceFiles, err := getCoverage()
 	if err != nil {
 		return err
 	}
+	log.Println("Done getting coverage")
 
 	j := Job{
 		RunAt:              time.Now(),
